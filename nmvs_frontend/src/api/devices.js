@@ -7,3 +7,10 @@ export const updateDevice = (id, data) => api.put(`/devices/${id}`, data).then((
 export const deleteDevice = (id) => api.delete(`/devices/${id}`).then((r) => r.data)
 export const detectDevice = (ip) => api.get(`/devices/detect/${encodeURIComponent(ip)}`).then((r) => r.data)
 export const redetectDevice = (id) => api.post(`/devices/${id}/redetect`).then((r) => r.data)
+
+// Queue a LAN-side ping through the authenticated Local Agent.
+export const createLocalDetection = (ip) =>
+  api.post('/devices/detection-requests', { ip }).then((r) => r.data)
+
+export const getLocalDetectionResult = (jobId) =>
+  api.get(`/devices/detection-requests/${jobId}`).then((r) => r.data)

@@ -1,6 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Activity, Edit2, Eye, Plus, Radar, Search, Trash2 } from 'lucide-react'
-import { createDevice, deleteDevice, detectDevice, getDevices, redetectDevice, updateDevice } from '../api/devices'
+import {
+  createDevice, createLocalDetection, deleteDevice, detectDevice,
+  getDevices, getLocalDetectionResult, redetectDevice, updateDevice,
+} from '../api/devices'
 import { getApiError } from '../api/axios'
 import { useRemote } from '../hooks/useRemote'
 import { Button, DataTable, ErrorState, Notice, PageHeader, RefreshButton, Spinner, StatusBadge } from '../components/common'
@@ -45,6 +48,10 @@ export default function Devices() {
   const [detection, setDetection] = useState(null)
   const [detectError, setDetectError] = useState('')
   const [detecting, setDetecting] = useState(false)
+  const [localIp, setLocalIp] = useState('')
+  const [localJob, setLocalJob] = useState(null)
+  const [localError, setLocalError] = useState('')
+  const [localDetecting, setLocalDetecting] = useState(false)
   const filtered = useMemo(() => (devices || []).filter((device) => {
     const matches = `${device.name} ${device.ip} ${device.device_type} ${device.network_type}`.toLowerCase().includes(search.toLowerCase())
     return matches && (statusFilter === 'all' || String(device.status || 'unknown').toLowerCase() === statusFilter)
@@ -71,6 +78,37 @@ export default function Devices() {
     catch (requestError) { setDetectError(getApiError(requestError)) }
     finally { setDetecting(false) }
   }
+
+  async function detectViaLocalAgent(event) {
+    event.preventDefault()
+    setLocalDetecting(true)
+    setLocalError('')
+    setLocalJob(null)
+    try {
+      const created = await createLocalDetection(localIp.trim())
+      setLocalJob(created)
+      const startedAt = Date.now()
+      let current = created
+      // Poll only the authenticated job-status endpoint; the agent does the LAN ping.
+      while (Date.now() - startedAt < 35000 && ['pending', 'running'].includes(current.status)) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500))
+        current = await getLocalDetectionResult(created.job_id)
+        setLocalJob(current)
+      }
+      if (['pending', 'running'].includes(current.status)) {
+        setLocalJob({
+          ...current,
+          status: 'timeout',
+          error_message: current.error_message || 'No result received yet. Check that the Local Agent is running and connected to this backend.',
+        })
+      }
+    } catch (requestError) {
+      setLocalError(getApiError(requestError))
+    } finally {
+      setLocalDetecting(false)
+    }
+  }
+
   const columns = [
     { key: 'name', label: 'Device', render: (row) => <div className="cell-device"><span className={`device-dot ${String(row.status).toLowerCase() === 'online' ? 'dot-online' : ''}`} /><strong>{row.name}</strong><small>{row.ip}</small></div> },
     { key: 'device_type', label: 'Device type', render: (row) => <span className="type-pill">{row.device_type}</span> },
@@ -82,7 +120,27 @@ export default function Devices() {
   return <>
     <PageHeader eyebrow="ASSET MANAGEMENT" title="Device inventory" description="Manage registered network devices and their backend-detected classifications." actions={<><RefreshButton onClick={reload} loading={loading} /><Button onClick={() => setCreate(true)}><Plus size={16} /> Add device</Button></>} />
     {notice && <Notice onClose={() => setNotice('')}>{notice}</Notice>}
-    <section className="panel detect-panel"><div className="detect-copy"><div className="detect-icon"><Radar size={20} /></div><div><h2>Device detection</h2><p>Ask the backend to inspect an IP address. Device type and ISP data appear only when returned by the API.</p></div></div><div className="detect-controls"><input aria-label="IP address to detect" placeholder="IP address" value={detectorIp} onChange={(e) => setDetectorIp(e.target.value)} /><Button disabled={detecting || !detectorIp.trim()} onClick={detect}>{detecting ? 'Detecting…' : 'Detect device'}</Button></div>{detectError && <Notice type="error">{detectError}</Notice>}{detection && <div className="detect-result"><strong>{detection.device_type}</strong><span>{detection.ip}</span><StatusBadge status={detection.status} />{detection.isp && <span>ISP: {detection.isp}</span>}{detection.network_type && <span>Network: {detection.network_type}</span>}{detection.hostname && <span>Hostname: {detection.hostname}</span>}</div>}</section>
+    <section className="panel detect-panel"><div className="detect-copy"><div className="detect-icon"><Radar size={20} /></div><div><h2>Device detection</h2><p>Check device classification through the backend. This cloud-side lookup is separate from a LAN ping by the Local Agent.</p></div></div><div className="detect-controls"><input aria-label="IP address to detect" placeholder="IP address" value={detectorIp} onChange={(e) => setDetectorIp(e.target.value)} /><Button disabled={detecting || !detectorIp.trim()} onClick={detect}>{detecting ? 'Detecting…' : 'Detect device'}</Button></div>{detectError && <Notice type="error">{detectError}</Notice>}{detection && <div className="detect-result"><strong>{detection.device_type}</strong><span>{detection.ip}</span><StatusBadge status={detection.status} />{detection.isp && <span>ISP: {detection.isp}</span>}{detection.network_type && <span>Network: {detection.network_type}</span>}{detection.hostname && <span>Hostname: {detection.hostname}</span>}</div>}</section>
+    <section className="panel detect-panel">
+      <div className="detect-copy">
+        <div className="detect-icon"><Activity size={20} /></div>
+        <div><h2>LAN ping via Local Agent</h2><p>Queue a real-time ping from the Windows computer running the Local Agent. Works for registered and unregistered IPs reachable from that computer.</p></div>
+      </div>
+      <form className="detect-controls" onSubmit={detectViaLocalAgent}>
+        <input aria-label="LAN IP address to ping" placeholder="LAN IP, e.g. 10.80.237.74" value={localIp} onChange={(e) => setLocalIp(e.target.value)} required />
+        <Button type="submit" disabled={localDetecting || !localIp.trim()}>{localDetecting ? 'Pinging via agent…' : 'Ping from Local Agent'}</Button>
+      </form>
+      {localError && <Notice type="error">{localError}</Notice>}
+      {localJob && <div className="detect-result local-detection-result">
+        <strong>{localJob.ip}</strong>
+        <span>Job #{localJob.job_id}</span>
+        <StatusBadge status={localJob.result_status || localJob.status} />
+        {localJob.latency_ms != null && <span>Latency: {localJob.latency_ms} ms</span>}
+        {localJob.error_message && <span>{localJob.error_message}</span>}
+        {['pending', 'running'].includes(localJob.status) && <span>Waiting for Local Agent…</span>}
+      </div>}
+      <p className="field-hint">Requires a signed-in user and a running Local Agent configured to use the same backend.</p>
+    </section>
     <section className="panel table-panel">
       <div className="table-toolbar"><div><h2>Registered devices <span className="count-badge">{devices?.length ?? '—'}</span></h2><p>IP address, device type, network type and current status</p></div><div className="table-filters"><label className="search-input"><Search size={16} /><input aria-label="Search devices" placeholder="Search devices…" value={search} onChange={(e) => setSearch(e.target.value)} /></label><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">All status</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option></select></div></div>
       {loading && !devices ? <Spinner /> : error ? <ErrorState error={error} retry={reload} /> : <DataTable columns={columns} rows={filtered} empty={devices?.length ? 'No devices match your filters' : 'No devices registered'} />}
