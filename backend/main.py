@@ -52,7 +52,7 @@ FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 # ==================================================
 
 DEFAULT_CORS_ORIGINS = [
-    "https://nmvs-development.onrender.com",
+    "https://nmvs-development.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
