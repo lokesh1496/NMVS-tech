@@ -1,37 +1,32 @@
-# NMVS Local Agent (initial monitoring foundation)
+# NMVS Local Agent
 
-This agent runs on a Windows laptop that can reach the monitored LAN. It polls the deployed backend for registered device IPs, pings them locally, and uploads status/latency results over HTTPS.
+This agent runs on a Windows computer that can reach the monitored LAN. It polls the NMVS backend for registered devices, pings them locally, uploads status/latency results, and processes on-demand detection jobs.
 
-## 1. Configure backend
+## Run the complete project locally
 
-Set `NMVS_AGENT_TOKEN` in the backend host environment to a unique random secret of at least 32 characters. Never commit the real token to source control. Redeploy the backend after adding the variable.
+1. Start the backend on `http://127.0.0.1:8000` by following [the backend setup guide](../backend/README_BACKEND.md).
+2. Start the frontend on `http://localhost:5173` by following [the frontend setup guide](../nmvs_frontend/README.md). Its `.env.example` already points `VITE_API_URL` to the local backend.
+3. From this folder, install and configure the Local Agent:
 
-## 2. Run locally on Windows
+   ```powershell
+   py -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   Copy-Item .env.example .env
+   notepad .env
+   ```
 
-Open PowerShell in this folder:
+Set `NMVS_BACKEND_URL` to `http://127.0.0.1:8000`. Generate a random token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and put the exact same value in `NMVS_AGENT_TOKEN` in both `backend/.env` and `local_agent/.env`. Do not use the example placeholder as a production token. The agent loads its `.env` automatically when started from this folder:
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-notepad .env
-```
+   ```powershell
+   python .\agent.py
+   ```
 
-Set `NMVS_BACKEND_URL` to the deployed backend HTTPS URL and `NMVS_AGENT_TOKEN` to the same secret configured on the backend. Then load the variables into the current PowerShell session (PowerShell does not automatically load `.env`):
+The backend and agent must run on the same computer for the localhost URL above. If the agent runs on a different computer, use the backend computer's reachable LAN address instead of `127.0.0.1` and configure the backend to allow that frontend origin.
 
-```powershell
-$env:NMVS_BACKEND_URL="https://YOUR-BACKEND-DOMAIN"
-$env:NMVS_AGENT_TOKEN="YOUR_SAME_RANDOM_SECRET"
-$env:NMVS_AGENT_INTERVAL="30"
-python .\agent.py
-```
+## Environment and security
 
-The agent only monitors IPs already registered in the NMVS device inventory. Add a reachable test device in the existing website first. This first phase does not yet move interactive CIDR discovery or detailed hostname/MAC/port detection into the agent; those are later integration steps.
-
-## Security notes
-
-- Use HTTPS only.
-- Keep the token out of Git, frontend variables, logs, and screenshots.
-- This initial version uses a shared agent token; rotate it if exposed.
-- The agent should run only on a network you own or are authorized to monitor.
+- Keep real `.env` files out of Git. Only `.env.example` templates belong in the repository.
+- Use the same strong `NMVS_AGENT_TOKEN` in the backend and agent.
+- Use HTTPS for a deployed backend; HTTP is allowed only for localhost.
+- The agent can monitor registered device IPs and process on-demand detection requests for reachable addresses.
