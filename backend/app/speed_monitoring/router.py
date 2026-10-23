@@ -91,7 +91,7 @@ def get_local_speed_test(job_id: int):
         now = now_ist_naive()
         if (
             job.status in ("pending", "running")
-            and now - job.created_at > timedelta(seconds=180)
+            and now - job.created_at > timedelta(seconds=600)
         ):
             job.status = "timeout"
             job.error_message = "Local Agent did not complete the speed test in time"

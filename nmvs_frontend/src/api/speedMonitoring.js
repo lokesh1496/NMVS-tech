@@ -5,7 +5,7 @@ export const runSpeedTest = async (ip = 'internet') => {
   const startedAt = Date.now()
   let result = job
 
-  while (Date.now() - startedAt < 190000 && ['pending', 'running'].includes(result.status)) {
+  while (Date.now() - startedAt < 620000 && ['pending', 'running'].includes(result.status)) {
     await new Promise((resolve) => window.setTimeout(resolve, 2000))
     const response = await api.get(`/speed-monitoring/local-jobs/${job.job_id}`)
     result = response.data
