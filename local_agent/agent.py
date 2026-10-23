@@ -105,19 +105,34 @@ def upload_results(session: requests.Session, results: list[dict[str, Any]]) -> 
     print(f"Uploaded {len(results)} monitoring results: {response.status_code}")
 
 
-def run_once(session: requests.Session) -> None:
+
+def run_once(session):
     devices = fetch_devices(session)
-    results: list[dict[str, Any]] = []
+    results = []
+
     for device in devices:
-        ip = str(device.get("ip", "")).strip()
+        ip = device.get("ip")
+
+        if not ip:
+            continue
+
         try:
-            results.append(ping(ip))
-        except ValueError:
-            print(f"Skipping invalid IP from backend: {ip!r}")
+            result = ping(ip)
+            results.append(result)
+
+            print(
+                f"Device: {result['ip']} | "
+                f"Status: {result['status']} | "
+                f"Latency: {result.get('latency_ms')} ms"
+            )
+
+        except Exception as exc:
+            print(f"Device: {ip} | Error: {exc}")
+
     if results:
         upload_results(session, results)
     else:
-        print("No registered devices to monitor yet.")
+        print("No valid registered devices to monitor.")
 
 
 def main() -> None:
