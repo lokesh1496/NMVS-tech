@@ -73,18 +73,35 @@ def receive_monitoring_results(
     transitions: list[tuple[str, str, str | None]] = []
     timestamp = now_ist_naive()
     try:
+        
         for ip, item in normalized_results.items():
             previous = (
                 db.query(MonitoringHistory)
                 .filter(MonitoringHistory.ip == ip)
-                .order_by(MonitoringHistory.checked_at.desc(), MonitoringHistory.id.desc())
+                .order_by(
+                    MonitoringHistory.checked_at.desc(),
+                    MonitoringHistory.id.desc(),
+                )
                 .first()
             )
             old_status = previous.status if previous else None
-            history = MonitoringHistory(ip=ip, status=item.status, checked_at=timestamp)
+
+            # Update the registered device's current status.
+            device = db.query(Device).filter(Device.ip == ip).first()
+            if device:
+                device.status = item.status
+
+            # Save monitoring history.
+            history = MonitoringHistory(
+                ip=ip,
+                status=item.status,
+                checked_at=timestamp,
+            )
             db.add(history)
             transitions.append((ip, item.status, old_status))
+
         db.commit()
+
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to save monitoring results") from exc
