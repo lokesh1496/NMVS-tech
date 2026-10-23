@@ -9,10 +9,10 @@ import requests
 
 
 _BASE_URL = "https://speed.cloudflare.com"
-_DOWNLOAD_SIZE = 5_000_000
-_UPLOAD_SIZE = 1_000_000
-_PARALLEL_REQUESTS = 4
-_TIMEOUT = (10, 60)
+_DOWNLOAD_SIZE = 1_000_000
+_UPLOAD_SIZE = 250_000
+_PARALLEL_REQUESTS = 3
+_TIMEOUT = (5, 15)
 
 
 def _get_ping_ms() -> float:
@@ -71,11 +71,21 @@ def _measure_transfer(transfer, request_count: int) -> float:
 
 
 def run_speed_test() -> dict[str, float]:
+    print("[Speed Test] Measuring latency...")
+    ping_ms = _get_ping_ms()
+
+    print("[Speed Test] Measuring download...")
+    download_mbps = _measure_transfer(
+        _download_bytes,
+        request_count=_PARALLEL_REQUESTS,
+    )
+
+    print("[Speed Test] Measuring upload...")
+    upload_mbps = _measure_transfer(_upload_bytes, request_count=1)
+    print("[Speed Test] Measurements complete; sending results to backend.")
+
     return {
-        "ping_ms": _get_ping_ms(),
-        "download_mbps": _measure_transfer(
-            _download_bytes,
-            request_count=_PARALLEL_REQUESTS,
-        ),
-        "upload_mbps": _measure_transfer(_upload_bytes, request_count=1),
+        "ping_ms": ping_ms,
+        "download_mbps": download_mbps,
+        "upload_mbps": upload_mbps,
     }
