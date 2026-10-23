@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 from contextlib import asynccontextmanager
@@ -7,13 +8,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from database.database import Base, DB_TYPE, engine
+from database.database import Base, DB_TYPE, engine, init_db
 from app.config import settings
 
 # Import models so SQLAlchemy can register their metadata.
 from app.monitoring.model import MonitoringHistory
 from app.speed_monitoring.model import DeviceBandwidthHistory
 from app.alerts.model import Alert
+from app.agent.detection_model import DetectionJob
 
 # Routers
 from app.devices.router import router as devices_router
@@ -30,6 +32,7 @@ from app.metrics.router import router as metrics_router
 from app.agent.router import router as agent_router
 from app.monitoring.scheduler import monitor_devices
 
+from app.agent.detection_routes import router as detection_requests_router
 
 # ==================================================
 # PATH CONFIGURATION
@@ -83,9 +86,8 @@ def get_allowed_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from database.database import init_db
-
-    # Run database migrations where configured.
+    # For non-SQLite databases, apply existing migrations when configured.
+    # SQLite uses init_db() directly in this application.
     alembic_ini_path = BASE_DIR / "alembic.ini"
 
     if alembic_ini_path.is_file() and DB_TYPE != "sqlite":
@@ -95,15 +97,22 @@ async def lifespan(app: FastAPI):
         alembic_config = Config(str(alembic_ini_path))
         command.upgrade(alembic_config, "head")
 
+    # DetectionJob is imported above, so its table is registered in metadata.
     init_db()
 
     # Vercel/serverless workers cannot provide a reliable persistent scheduler.
-    # Local Agent uploads become the source of LAN monitoring results there.
-    scheduler_enabled = os.getenv("NMVS_ENABLE_MONITORING_SCHEDULER", "true").strip().lower() in {"1", "true", "yes"}
+    scheduler_enabled = (
+        os.getenv("NMVS_ENABLE_MONITORING_SCHEDULER", "true")
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
+
     if os.getenv("VERCEL") == "1":
         scheduler_enabled = False
 
     monitoring_task = None
+
     if scheduler_enabled:
         monitoring_task = asyncio.create_task(
             monitor_devices(settings.DEVICE_MONITOR_INTERVAL)
@@ -123,6 +132,7 @@ async def lifespan(app: FastAPI):
 # ==================================================
 # CREATE FASTAPI APPLICATION ONCE
 # ==================================================
+
 
 app = FastAPI(
     title="Network Monitoring and Visualization System",
@@ -168,7 +178,7 @@ app.include_router(alerts_router)
 app.include_router(reports_router)
 app.include_router(metrics_router)
 app.include_router(agent_router)
-
+app.include_router(detection_requests_router)
 
 # ==================================================
 # ROOT ENDPOINT
