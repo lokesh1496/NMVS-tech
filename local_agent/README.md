@@ -1,6 +1,6 @@
 # NMVS Local Agent
 
-This agent runs on a Windows computer that can reach the monitored LAN. It polls the NMVS backend for registered devices, pings them locally, uploads status/latency results, and processes on-demand detection jobs.
+This agent runs on a Windows computer that can reach the monitored LAN. It polls the NMVS backend for registered devices, pings them locally, uploads status/latency results, processes single-IP ping requests, and runs on-demand Internet speed tests from this computer.
 
 ## Run the complete project locally
 
@@ -29,4 +29,6 @@ The backend and agent must run on the same computer for the localhost URL above.
 - Keep real `.env` files out of Git. Only `.env.example` templates belong in the repository.
 - Use the same strong `NMVS_AGENT_TOKEN` in the backend and agent.
 - Use HTTPS for a deployed backend; HTTP is allowed only for localhost.
-- The agent can monitor registered device IPs and process on-demand detection requests for reachable addresses.
+- - The agent can monitor registered device IPs, ping one explicitly entered address, and measure this computer's Internet connection using Cloudflare's speed-test service.
+- CIDR network discovery still runs from the backend host; the Local Agent does not perform network-range scans.
+- Rebuild the Local Agent executable after updating its Python source so the executable includes the speed-test worker.

@@ -18,6 +18,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.agent.detection_model import DetectionJob
 from app.devices.model import Device
 from app.monitoring.model import MonitoringHistory
+from app.speed_monitoring.model import DeviceBandwidthHistory
+from app.speed_monitoring.speed_job_model import SpeedTestJob
 from app.timezone import now_ist_naive
 from database.database import SessionLocal
 
@@ -46,6 +48,14 @@ class AgentDetectionRequest(BaseModel):
 class AgentDetectionResult(BaseModel):
     status: str = Field(pattern=r"^(Online|Offline)$")
     latency_ms: float | None = Field(default=None, ge=0, le=600_000)
+
+
+class AgentSpeedTestResult(BaseModel):
+    status: str = Field(pattern=r"^(completed|failed)$")
+    download_mbps: float | None = Field(default=None, ge=0, le=100_000)
+    upload_mbps: float | None = Field(default=None, ge=0, le=100_000)
+    ping_ms: float | None = Field(default=None, ge=0, le=600_000)
+    error_message: str | None = Field(default=None, max_length=1000)
 
 
 # ---------------------------------------------------------------------------
@@ -358,5 +368,114 @@ def submit_detection_result(
             detail="Could not save detection result",
         ) from exc
 
+    finally:
+        db.close()
+
+
+@router.get("/speed-tests/next")
+def get_next_speed_test(
+    x_agent_token: str | None = Header(default=None),
+):
+    """Claim the next queued speed test for the Local Agent."""
+    _authenticate_agent(x_agent_token)
+
+    db = SessionLocal()
+    try:
+        query = (
+            db.query(SpeedTestJob)
+            .filter(SpeedTestJob.status == "pending")
+            .order_by(SpeedTestJob.created_at.asc(), SpeedTestJob.id.asc())
+        )
+
+        if db.bind and db.bind.dialect.name == "postgresql":
+            query = query.with_for_update(skip_locked=True)
+
+        job = query.first()
+        if job is None:
+            return {"job": None}
+
+        job.status = "running"
+        job.updated_at = now_ist_naive()
+        db.commit()
+
+        return {"job": {"job_id": job.id, "ip": job.ip}}
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not claim speed test",
+        ) from exc
+    finally:
+        db.close()
+
+
+@router.post("/speed-tests/{job_id}/result")
+def submit_speed_test_result(
+    job_id: int,
+    payload: AgentSpeedTestResult,
+    x_agent_token: str | None = Header(default=None),
+):
+    """Persist a Local Agent speed test result and add successful tests to history."""
+    _authenticate_agent(x_agent_token)
+
+    db = SessionLocal()
+    try:
+        query = db.query(SpeedTestJob).filter(SpeedTestJob.id == job_id)
+        if db.bind and db.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        job = query.first()
+
+        if job is None:
+            raise HTTPException(status_code=404, detail="Speed test not found")
+        if job.status != "running":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Speed test is not running: {job.status}",
+            )
+
+        if payload.status == "completed":
+            if (
+                payload.download_mbps is None
+                or payload.upload_mbps is None
+                or payload.ping_ms is None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Completed speed tests must include all measurements",
+                )
+
+            record = DeviceBandwidthHistory(
+                ip=job.ip,
+                download_mbps=payload.download_mbps,
+                upload_mbps=payload.upload_mbps,
+                ping_ms=payload.ping_ms,
+            )
+            db.add(record)
+            job.download_mbps = payload.download_mbps
+            job.upload_mbps = payload.upload_mbps
+            job.ping_ms = payload.ping_ms
+            job.status = "completed"
+        else:
+            job.status = "failed"
+
+        job.error_message = payload.error_message
+        job.updated_at = now_ist_naive()
+        db.commit()
+
+        return {
+            "job_id": job.id,
+            "ip": job.ip,
+            "status": job.status,
+            "download_mbps": job.download_mbps,
+            "upload_mbps": job.upload_mbps,
+            "ping_ms": job.ping_ms,
+            "error_message": job.error_message,
+        }
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save speed test result",
+        ) from exc
     finally:
         db.close()

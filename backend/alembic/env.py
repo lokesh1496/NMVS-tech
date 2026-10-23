@@ -17,6 +17,7 @@ from app.devices.model import Device
 from app.alerts.model import Alert
 from app.monitoring.model import MonitoringHistory
 from app.speed_monitoring.model import DeviceBandwidthHistory
+from app.speed_monitoring.speed_job_model import SpeedTestJob
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

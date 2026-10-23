@@ -14,6 +14,7 @@ from app.config import settings
 # Import models so SQLAlchemy can register their metadata.
 from app.monitoring.model import MonitoringHistory
 from app.speed_monitoring.model import DeviceBandwidthHistory
+from app.speed_monitoring.speed_job_model import SpeedTestJob
 from app.alerts.model import Alert
 from app.agent.detection_model import DetectionJob
 
@@ -97,7 +98,7 @@ async def lifespan(app: FastAPI):
         alembic_config = Config(str(alembic_ini_path))
         command.upgrade(alembic_config, "head")
 
-    # DetectionJob is imported above, so its table is registered in metadata.
+    # Imported models are registered so SQLite can create their tables.
     init_db()
 
     # Vercel/serverless workers cannot provide a reliable persistent scheduler.

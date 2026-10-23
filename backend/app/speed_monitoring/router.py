@@ -1,5 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import timedelta
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.speed_monitoring.speed_job_model import SpeedTestJob
+from app.timezone import now_ist_naive
+from database.database import SessionLocal
 from app.dependencies import get_current_user
 from . import service
 from .schema import (
@@ -7,6 +14,11 @@ from .schema import (
     SpeedTestRequest,
     SpeedTestResponse
 )
+
+
+class LocalSpeedTestRequest(BaseModel):
+    ip: str = Field(default="internet", min_length=1, max_length=255)
+
 
 router = APIRouter(
     prefix="/speed-monitoring",
@@ -42,6 +54,63 @@ def run_and_save_speed_test(request: SpeedTestRequest = None):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Speed test failed: {str(e)}"
         )
+
+
+@router.post("/local-jobs", status_code=status.HTTP_201_CREATED)
+def create_local_speed_test(payload: LocalSpeedTestRequest):
+    """Queue an Internet speed test to run from the connected Local Agent."""
+    label = payload.ip.strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="History label cannot be blank")
+
+    db = SessionLocal()
+    try:
+        job = SpeedTestJob(ip=label, status="pending")
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {"job_id": job.id, "ip": job.ip, "status": job.status}
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not queue local speed test",
+        ) from exc
+    finally:
+        db.close()
+
+
+@router.get("/local-jobs/{job_id}")
+def get_local_speed_test(job_id: int):
+    db = SessionLocal()
+    try:
+        job = db.query(SpeedTestJob).filter(SpeedTestJob.id == job_id).first()
+        if job is None:
+            raise HTTPException(status_code=404, detail="Speed test not found")
+
+        now = now_ist_naive()
+        if (
+            job.status in ("pending", "running")
+            and now - job.created_at > timedelta(seconds=180)
+        ):
+            job.status = "timeout"
+            job.error_message = "Local Agent did not complete the speed test in time"
+            job.updated_at = now
+            db.commit()
+
+        return {
+            "job_id": job.id,
+            "ip": job.ip,
+            "status": job.status,
+            "download_mbps": job.download_mbps,
+            "upload_mbps": job.upload_mbps,
+            "ping_ms": job.ping_ms,
+            "error_message": job.error_message,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        }
+    finally:
+        db.close()
 
 
 # ==================================================

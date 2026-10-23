@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from network_utils import ping
 from detection_worker import detection_worker
+from speed_worker import speed_worker
 
 
 load_dotenv()
@@ -150,6 +151,14 @@ def main() -> None:
     )
     detection_thread.start()
 
+    speed_thread = threading.Thread(
+        target=speed_worker,
+        args=(BACKEND_URL, api_headers(), stop_event),
+        name="nmvs-speed-worker",
+        daemon=True,
+    )
+    speed_thread.start()
+
     try:
         # Existing registered-device monitoring loop.
         with requests.Session() as session:
@@ -177,6 +186,7 @@ def main() -> None:
     finally:
         stop_event.set()
         detection_thread.join(timeout=3)
+        speed_thread.join(timeout=3)
         print("NMVS Local Agent stopped.")
 
 
